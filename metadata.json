@@ -1,6 +1,6 @@
 {
-  "name": "Cross-Platform Music Player",
-  "description": "A premium dark-themed music player with offline playback, local file scanning, playlists, equalizer, and seamless Spotify integration.",
+  "name": "Spotify Sync Audio Player",
+  "description": "Elegant full-stack Web Audio Client featuring offline database synchronization, visual equalizer effects, and premium Spotify integration.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

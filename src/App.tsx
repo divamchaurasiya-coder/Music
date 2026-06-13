@@ -28,6 +28,7 @@ function MainAppLayout() {
   const [spotifyToken, setSpotifyToken] = useState<string | null>(null);
   const [spotifyUser, setSpotifyUser] = useState<SpotifyUser | null>(null);
   const [isConnectingSpotify, setIsConnectingSpotify] = useState(false);
+  const [spotifyError, setSpotifyError] = useState<string | null>(null);
   const [syncingPlaylistId, setSyncingPlaylistId] = useState<string | null>(null);
   const [selectPlaylistModalOpen, setSelectPlaylistModalOpen] = useState(false);
   const [trackToAdd, setTrackToAdd] = useState<Track | null>(null);
@@ -291,17 +292,37 @@ function MainAppLayout() {
   // Generate / Handle Spotify connection popup with same-tab redirect fallback for sandboxed iframe environments
   const connectSpotify = async () => {
     setIsConnectingSpotify(true);
-    try {
-      const clientOrigin = window.location.origin;
-      const res = await fetch(`/api/spotify/auth-url?origin=${encodeURIComponent(clientOrigin)}`);
-      const data = await res.json();
-      
-      const authUrl = data.url || data.demoUrl;
-      const width = 550;
-      const height = 650;
-      const left = window.screen.width / 2 - width / 2;
-      const top = window.screen.height / 2 - height / 2;
+    setSpotifyError(null);
 
+    const width = 550;
+    const height = 650;
+    const left = window.screen.width / 2 - width / 2;
+    const top = window.screen.height / 2 - height / 2;
+
+    // 1. Immediately spawn the window context synchronously within the user click gesture!
+    // This makes modern browsers treat the window as high priority and bypass popup blockers.
+    let authWindow: Window | null = null;
+    try {
+      authWindow = window.open(
+        "about:blank",
+        "spotify_oauth_popup",
+        `width=${width},height=${height},top=${top},left=${left},scrollbars=yes,resizable=yes`
+      );
+    } catch (e) {
+      console.warn("Same-origin context blocked standard window.open synchronous invocation.", e);
+    }
+
+    try {
+      const clientOrigin = window.location.origin === "null" ? "" : window.location.origin;
+      const res = await fetch(`/api/spotify/auth-url?origin=${encodeURIComponent(clientOrigin)}`);
+      
+      if (!res.ok) {
+        throw new Error(`Server returned HTTP ${res.status}`);
+      }
+      
+      const data = await res.json();
+      const authUrl = data.url || data.demoUrl;
+      
       // Passing origin as state so callback redirects accurately
       const stateParam = clientOrigin;
       const finalUrl = authUrl.includes("state=")
@@ -310,23 +331,19 @@ function MainAppLayout() {
         ? `${authUrl}&state=${encodeURIComponent(stateParam)}`
         : `${authUrl}?state=${encodeURIComponent(stateParam)}`;
 
-      let authPopup = null;
-      try {
-        authPopup = window.open(
-          finalUrl,
-          "spotify_oauth_popup",
-          `width=${width},height=${height},top=${top},left=${left},scrollbars=yes,resizable=yes`
-        );
-      } catch (domErr) {
-        console.warn("Iframe popup blocker or Security Policy prevented window.open. Triggering same-tab seamless OAuth login:", domErr);
-      }
-
-      if (!authPopup) {
-        // Safe, direct, universal fallback for sandboxed preview IFrames
+      if (authWindow && !authWindow.closed) {
+        // Update the location of the pre-opened synchronous window reference
+        authWindow.location.href = finalUrl;
+      } else {
+        // Fallback to direct window location navigation for sandboxed environments
         window.location.href = finalUrl;
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error("Failed to fetch Spotify Redirect parameters:", e);
+      setSpotifyError(e.message || "Failed to fetch connection URL from server.");
+      if (authWindow && !authWindow.closed) {
+        authWindow.close();
+      }
     } finally {
       setIsConnectingSpotify(false);
     }
@@ -459,7 +476,7 @@ function MainAppLayout() {
         </div>
 
         {/* Spotify OAuth Trigger bar */}
-        <div id="spotify-connection-header">
+        <div id="spotify-connection-header" className="flex flex-col items-end">
           {spotifyToken ? (
             <div className="flex items-center space-x-3 text-xs bg-black/40 border border-[#1DB954]/30 rounded-full py-1.5 pl-3 pr-4 shadow-lg select-none">
               <div className="w-6 h-6 rounded-full bg-[#1DB954]/10 border border-[#1DB954]/40 flex items-center justify-center shrink-0">
@@ -478,19 +495,26 @@ function MainAppLayout() {
               </button>
             </div>
           ) : (
-            <button
-              id="connect-spotify-btn"
-              onClick={connectSpotify}
-              disabled={isConnectingSpotify}
-              className="flex items-center space-x-2 bg-[#1DB954] hover:bg-[#1ed760] disabled:bg-zinc-800 text-black font-bold text-[11px] py-2 px-4 rounded-full shadow-lg transition-all active:scale-95 cursor-pointer leading-none uppercase tracking-wider"
-            >
-              {isConnectingSpotify ? (
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <LogIn className="w-3.5 h-3.5 shrink-0" />
+            <div className="flex flex-col items-end">
+              <button
+                id="connect-spotify-btn"
+                onClick={connectSpotify}
+                disabled={isConnectingSpotify}
+                className="flex items-center space-x-2 bg-[#1DB954] hover:bg-[#1ed760] disabled:bg-zinc-800 text-black font-bold text-[11px] py-2 px-4 rounded-full shadow-lg transition-all active:scale-95 cursor-pointer leading-none uppercase tracking-wider"
+              >
+                {isConnectingSpotify ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <LogIn className="w-3.5 h-3.5 shrink-0" />
+                )}
+                <span>Connect Spotify</span>
+              </button>
+              {spotifyError && (
+                <span className="text-[9px] text-red-400 font-mono bg-red-950/40 border border-red-500/20 py-0.5 px-2 rounded mt-1.5 text-right max-w-[220px]">
+                  {spotifyError}
+                </span>
               )}
-              <span>Connect Spotify</span>
-            </button>
+            </div>
           )}
         </div>
       </header>

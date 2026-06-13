@@ -28,7 +28,15 @@ app.get("/api/spotify/auth-url", (req, res) => {
   
   // Spotify Dashboard requires this exact URI registered.
   // Prioritize the client's current browser location origin to avoid internal proxy confusion.
-  const baseUrl = queryOrigin ? queryOrigin.replace(/\/+$/, "") : (process.env.APP_URL ? process.env.APP_URL.replace(/\/+$/, "") : `${protocol}://${host}`);
+  let baseUrl = "";
+  if (queryOrigin && queryOrigin !== "null" && queryOrigin !== "undefined" && queryOrigin.trim() !== "") {
+    baseUrl = queryOrigin.replace(/\/+$/, "");
+  } else if (process.env.APP_URL) {
+    baseUrl = process.env.APP_URL.replace(/\/+$/, "");
+  } else {
+    baseUrl = `${protocol}://${host}`;
+  }
+  
   const defaultRedirectUri = `${baseUrl}/api/spotify/callback`;
   
   const scopes = [
@@ -70,8 +78,10 @@ app.get("/api/spotify/callback", async (req, res) => {
   
   const baseUrl = process.env.APP_URL ? process.env.APP_URL.replace(/\/+$/, "") : `${protocol}://${host}`;
 
-  // Fallback state if undefined
-  const targetOrigin = (state as string) || baseUrl;
+  // Fallback state if undefined or null
+  const targetOrigin = (state && state !== "null" && state !== "undefined" && (state as string).trim() !== "")
+    ? (state as string)
+    : baseUrl;
   const redirectUri = `${targetOrigin}/api/spotify/callback`;
 
   // 1. Handle Demo Mode bypass
@@ -102,7 +112,7 @@ app.get("/api/spotify/callback", async (req, res) => {
                   type: "OAUTH_AUTH_SUCCESS",
                   accessToken: "${demoToken}",
                   isDemo: true
-                }, "${targetOrigin}");
+                }, "*");
                 window.close();
               } else {
                 const url = new URL("${targetOrigin}");
@@ -163,7 +173,7 @@ app.get("/api/spotify/callback", async (req, res) => {
                 type: "OAUTH_AUTH_SUCCESS",
                 accessToken: "${accessToken}",
                 isDemo: false
-              }, "${targetOrigin}");
+              }, "*");
               window.close();
             } else {
               const url = new URL("${targetOrigin}");
@@ -210,7 +220,7 @@ app.get("/api/spotify/callback", async (req, res) => {
                   type: "OAUTH_AUTH_SUCCESS",
                   accessToken: demoToken,
                   isDemo: true
-                }, "${targetOrigin}");
+                }, "*");
                 window.close();
               } else {
                 const url = new URL("${targetOrigin}");
