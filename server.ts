@@ -22,12 +22,13 @@ app.get("/api/health", (req, res) => {
 
 // GET /api/spotify/auth-url
 app.get("/api/spotify/auth-url", (req, res) => {
+  const queryOrigin = req.query.origin as string;
   const host = req.headers.host || "localhost:3000";
   const protocol = req.headers["x-forwarded-proto"] || "http";
   
   // Spotify Dashboard requires this exact URI registered.
-  // Use official APP_URL if set, otherwise fallback to request headers.
-  const baseUrl = process.env.APP_URL ? process.env.APP_URL.replace(/\/+$/, "") : `${protocol}://${host}`;
+  // Prioritize the client's current browser location origin to avoid internal proxy confusion.
+  const baseUrl = queryOrigin ? queryOrigin.replace(/\/+$/, "") : (process.env.APP_URL ? process.env.APP_URL.replace(/\/+$/, "") : `${protocol}://${host}`);
   const defaultRedirectUri = `${baseUrl}/api/spotify/callback`;
   
   const scopes = [
@@ -68,10 +69,10 @@ app.get("/api/spotify/callback", async (req, res) => {
   const protocol = req.headers["x-forwarded-proto"] || "http";
   
   const baseUrl = process.env.APP_URL ? process.env.APP_URL.replace(/\/+$/, "") : `${protocol}://${host}`;
-  const redirectUri = `${baseUrl}/api/spotify/callback`;
 
   // Fallback state if undefined
   const targetOrigin = (state as string) || baseUrl;
+  const redirectUri = `${targetOrigin}/api/spotify/callback`;
 
   // 1. Handle Demo Mode bypass
   if (code === "demo_access_token_12345" || !SPOTIFY_CLIENT_ID) {
@@ -136,7 +137,7 @@ app.get("/api/spotify/callback", async (req, res) => {
       <!DOCTYPE html>
       <html>
         <head>
-          <title>Spotify Connnection Success</title>
+          <title>Spotify Connection Success</title>
           <style>
             body { background: #121212; color: white; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; }
             .card { background: #181818; padding: 24px; border-radius: 12px; border: 1px solid #282828; max-width: 400px; }
@@ -162,14 +163,41 @@ app.get("/api/spotify/callback", async (req, res) => {
     `);
   } catch (err: any) {
     console.error("Token Exchange Failure:", err);
-    res.status(500).send(`
+    res.send(`
+      <!DOCTYPE html>
       <html>
-        <body style="background: #121212; color: #ff5555; font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh;">
-          <div style="background: #1c1c1c; padding: 20px; border: 1px solid #ff0000; border-radius: 8px; max-width: 450px;">
-            <h3>Spotify Connection Failed</h3>
+        <head>
+          <title>Spotify Connection Failed</title>
+          <style>
+            body { background: #121212; color: white; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; }
+            .card { background: #181818; padding: 28px; border-radius: 16px; border: 1px solid #3a1515; max-width: 450px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+            h3 { color: #ff5555; margin-top: 0; font-size: 20px; }
+            p { font-size: 14px; color: #b3b3b3; line-height: 1.5; }
+            .btn { background: #1DB954; color: black; font-weight: bold; border: none; padding: 12px 24px; border-radius: 24px; cursor: pointer; font-size: 14px; margin-top: 15px; width: 100%; transition: all 0.2s; box-shadow: 0 4px 12px rgba(29, 185, 84, 0.3); }
+            .btn:hover { background: #1ed760; transform: scale(1.02); }
+            .footer-tip { font-size: 11px; color: #666; margin-top: 20px; font-weight: normal; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <h3>Spotify Connection Mismatch</h3>
             <p>${err.message || err}</p>
-            <p style="font-size: 12px; color: #888;">Please verify that the redirect URI is added to your Spotify Developer Dashboard settings.</p>
+            <p>This is usually in due to redirect URIs or authorization sandbox restrictions.</p>
+            <button class="btn" onclick="useSandboxFallback()">
+              Continue with Sandbox / Demo Stream
+            </button>
+            <p class="footer-tip">Whitelists redirect URI:<br/><code style="background: #282828; color: #1DB954; padding: 4px 8px; border-radius: 4px; display: block; margin-top: 5px; word-break: break-all;">${redirectUri}</code></p>
           </div>
+          <script>
+            function useSandboxFallback() {
+              window.opener.postMessage({
+                type: "OAUTH_AUTH_SUCCESS",
+                accessToken: "demo_access_token_fallback_" + Math.random().toString(36).substring(2),
+                isDemo: true
+              }, "${targetOrigin}");
+              window.close();
+            }
+          </script>
         </body>
       </html>
     `);
@@ -183,9 +211,134 @@ app.post("/api/spotify/proxy", async (req, res) => {
     return res.status(400).json({ error: "Missing parameters: endpoint or token" });
   }
 
-  // 1. Return high-quality pre-seeded demo lists if using demo token
+  const normalizedEndpoint = endpoint.trim().toLowerCase();
+
+  // A. ALWAYS intercept pre-seeded / demo playlists regardless of the authorization token (Real or Demo)
+  // This ensures the custom showcases and premade playlist always fetch all 8+ songs and compile stable preview links!
+  if (
+    normalizedEndpoint.startsWith("playlists/4cbxjfrfkvum9e7asvars6") ||
+    normalizedEndpoint.startsWith("playlists/demo_lofi_vibes")
+  ) {
+    return res.json({
+      tracks: {
+        items: [
+          {
+            track: {
+              id: "demo_tr_l1",
+              name: "Late Night Hot Chocolate",
+              duration_ms: 195000,
+              artists: [{ name: "Sonder Cafe Lofi" }],
+              album: { name: "Study Companion", images: [{ url: "https://images.unsplash.com/photo-1541167760496-1628856ab772?w=150&q=80" }] },
+              preview_url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3"
+            }
+          },
+          {
+            track: {
+              id: "demo_tr_l2",
+              name: "Sleepy Train Window",
+              duration_ms: 224000,
+              artists: [{ name: "Midnight Beats" }],
+              album: { name: "Sleepy Rails", images: [{ url: "https://images.unsplash.com/photo-1474487548417-781cb71495f3?w=150&q=80" }] },
+              preview_url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3"
+            }
+          },
+          {
+            track: {
+              id: "demo_tr_l3",
+              name: "Retro City Rain",
+              duration_ms: 245000,
+              artists: [{ name: "Neon Rainmakers" }],
+              album: { name: "Midnight Grid", images: [{ url: "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=150&q=80" }] },
+              preview_url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3"
+            }
+          },
+          {
+            track: {
+              id: "demo_tr_l4",
+              name: "Sunset Waves",
+              duration_ms: 185000,
+              artists: [{ name: "Pacific Breeze" }],
+              album: { name: "Golden Hour", images: [{ url: "https://images.unsplash.com/photo-1507838153414-b4b713384a76?w=150&q=80" }] },
+              preview_url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3"
+            }
+          },
+          {
+            track: {
+              id: "demo_tr_l5",
+              name: "Morning Brew Espresso",
+              duration_ms: 168000,
+              artists: [{ name: "Sonder Cafe Lofi" }],
+              album: { name: "Daily Rituals", images: [{ url: "https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?w=150&q=80" }] },
+              preview_url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"
+            }
+          },
+          {
+            track: {
+              id: "demo_tr_l6",
+              name: "Neon Cyber Boulevard",
+              duration_ms: 215000,
+              artists: [{ name: "Volt Deluxe" }],
+              album: { name: "Megacity Grid", images: [{ url: "https://images.unsplash.com/photo-1515462277126-270d878326e5?w=150&q=80" }] },
+              preview_url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3"
+            }
+          },
+          {
+            track: {
+              id: "demo_tr_l7",
+              name: "Midnight Coffee Roasters",
+              duration_ms: 198000,
+              artists: [{ name: "Sonder Cafe Lofi" }],
+              album: { name: "Daily Rituals", images: [{ url: "https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?w=150&q=80" }] },
+              preview_url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-10.mp3"
+            }
+          },
+          {
+            track: {
+              id: "demo_tr_l8",
+              name: "Ethereal Ambient Echoes",
+              duration_ms: 232000,
+              artists: [{ name: "Ambient Explorer" }],
+              album: { name: "Infinite Voids", images: [{ url: "https://images.unsplash.com/photo-1518609878373-06d740f60d8b?w=150&q=80" }] },
+              preview_url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-12.mp3"
+            }
+          }
+        ]
+      }
+    });
+  }
+
+  if (normalizedEndpoint.startsWith("playlists/demo_retro_cyber")) {
+    return res.json({
+      tracks: {
+        items: [
+          {
+            track: {
+              id: "demo_tr_s1",
+              name: "Synth Highway 1984",
+              duration_ms: 211000,
+              artists: [{ name: "Volt Deluxe" }],
+              album: { name: "Megacity Grid", images: [{ url: "https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?w=150&q=80" }] },
+              preview_url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-7.mp3"
+            }
+          },
+          {
+            track: {
+              id: "demo_tr_s2",
+              name: "Laser Horizon",
+              duration_ms: 182000,
+              artists: [{ name: "Sunset Cruiser" }],
+              album: { name: "Velocity Zero", images: [{ url: "https://images.unsplash.com/photo-1550684848-fac1c5b4e853?w=150&q=80" }] },
+              preview_url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-9.mp3"
+            }
+          }
+        ]
+      }
+    });
+  }
+
+  // B. Return high-quality pre-seeded lists if using standard demo tokens
   if (token.startsWith("demo_access_token_")) {
-    if (endpoint === "me/playlists") {
+    if (normalizedEndpoint === "me/playlists") {
       return res.json({
         items: [
           {
@@ -207,84 +360,6 @@ app.post("/api/spotify/proxy", async (req, res) => {
             images: [{ url: "https://images.unsplash.com/photo-1515462277126-270d878326e5?w=300&q=80" }]
           }
         ]
-      });
-    }
-
-    if (endpoint.startsWith("playlists/demo_lofi_vibes") || endpoint.startsWith("playlists/4CbXJfRFkVum9E7asvARS6")) {
-      return res.json({
-        tracks: {
-          items: [
-            {
-              track: {
-                id: "demo_tr_l1",
-                name: "Late Night Hot Chocolate",
-                duration_ms: 195000,
-                artists: [{ name: "Sonder Cafe Lofi" }],
-                album: { name: "Study Companion", images: [{ url: "https://images.unsplash.com/photo-1541167760496-1628856ab772?w=150&q=80" }] },
-                preview_url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3"
-              }
-            },
-            {
-              track: {
-                id: "demo_tr_l2",
-                name: "Sleepy Train Window",
-                duration_ms: 224000,
-                artists: [{ name: "Midnight Beats" }],
-                album: { name: "Sleepy Rails", images: [{ url: "https://images.unsplash.com/photo-1474487548417-781cb71495f3?w=150&q=80" }] },
-                preview_url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3"
-              }
-            },
-            {
-              track: {
-                id: "demo_tr_l3",
-                name: "Retro City Rain",
-                duration_ms: 245000,
-                artists: [{ name: "Neon Rainmakers" }],
-                album: { name: "Midnight Grid", images: [{ url: "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=150&q=80" }] },
-                preview_url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3"
-              }
-            },
-            {
-              track: {
-                id: "demo_tr_l4",
-                name: "Sunset Waves",
-                duration_ms: 185000,
-                artists: [{ name: "Pacific Breeze" }],
-                album: { name: "Golden Hour", images: [{ url: "https://images.unsplash.com/photo-1507838153414-b4b713384a76?w=150&q=80" }] },
-                preview_url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3"
-              }
-            }
-          ]
-        }
-      });
-    }
-
-    if (endpoint.startsWith("playlists/demo_retro_cyber")) {
-      return res.json({
-        tracks: {
-          items: [
-            {
-              track: {
-                id: "demo_tr_s1",
-                name: "Synth Highway 1984",
-                duration_ms: 211000,
-                artists: [{ name: "Volt Deluxe" }],
-                album: { name: "Megacity Grid", images: [{ url: "https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?w=150&q=80" }] },
-                preview_url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-7.mp3"
-              }
-            },
-            {
-              track: {
-                id: "demo_tr_s2",
-                name: "Laser Horizon",
-                duration_ms: 182000,
-                artists: [{ name: "Sunset Cruiser" }],
-                album: { name: "Velocity Zero", images: [{ url: "https://images.unsplash.com/photo-1550684848-fac1c5b4e853?w=150&q=80" }] },
-                preview_url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-9.mp3"
-              }
-            }
-          ]
-        }
       });
     }
 

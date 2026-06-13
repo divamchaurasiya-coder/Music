@@ -109,9 +109,9 @@ function MainAppLayout() {
   // Listen to popup Message communication for Spotify connection
   useEffect(() => {
     const handleAuthMessage = (event: MessageEvent) => {
-      // Validate host origin is development run.app container or standard localhost
+      // Validate host origin is development run.app container, standard localhost, or exact current browser origin
       const origin = event.origin;
-      if (!origin.endsWith(".run.app") && !origin.includes("localhost")) {
+      if (!origin.endsWith(".run.app") && !origin.includes("localhost") && origin !== window.location.origin) {
         return;
       }
 
@@ -262,7 +262,8 @@ function MainAppLayout() {
   const connectSpotify = async () => {
     setIsConnectingSpotify(true);
     try {
-      const res = await fetch("/api/spotify/auth-url");
+      const clientOrigin = window.location.origin;
+      const res = await fetch(`/api/spotify/auth-url?origin=${encodeURIComponent(clientOrigin)}`);
       const data = await res.json();
       
       const authUrl = data.url || data.demoUrl;
@@ -272,7 +273,7 @@ function MainAppLayout() {
       const top = window.screen.height / 2 - height / 2;
 
       // Passing origin as state so callback redirects accurately
-      const stateParam = window.location.origin;
+      const stateParam = clientOrigin;
       const finalUrl = authUrl.includes("state=")
         ? authUrl // Already has state constructed on server
         : authUrl.includes("?") 
