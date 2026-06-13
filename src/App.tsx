@@ -52,6 +52,12 @@ function MainAppLayout() {
   const [selectPlaylistModalOpen, setSelectPlaylistModalOpen] = useState(false);
   const [showSpotifyImportPopup, setShowSpotifyImportPopup] = useState(false);
   const [trackToAdd, setTrackToAdd] = useState<Track | null>(null);
+  
+  // Custom enhanced Spotify states
+  const [spotifyPlaylistsError, setSpotifyPlaylistsError] = useState<string | null>(null);
+  const [isImportingUrl, setIsImportingUrl] = useState(false);
+  const [playlistUrlInput, setPlaylistUrlInput] = useState("");
+  const [importStatusMsg, setImportStatusMsg] = useState("");
 
   const {
     currentTrack,
@@ -113,6 +119,60 @@ function MainAppLayout() {
     refreshLocalData();
   }, [favorites]);
 
+  // Fetch Spotify user profile info (or fallback to mockup if in Demo Mode)
+  const fetchSpotifyUserProfile = async (token: string, isDemo: boolean): Promise<SpotifyUser> => {
+    if (isDemo || token.startsWith("demo_access_token_")) {
+      const userDetails: SpotifyUser = {
+        id: "spotify_sync_user",
+        displayName: "Demo User 🎵",
+        avatarUrl: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&q=80",
+        product: "Demo Mode"
+      };
+      setSpotifyUser(userDetails);
+      await saveUserSetting("spotify_user", userDetails);
+      return userDetails;
+    }
+
+    try {
+      const response = await fetch(getAbsoluteApiUrl("/api/spotify/proxy"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          endpoint: "me",
+          token: token
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Profile fetch response failed (HTTP ${response.status})`);
+      }
+      const data = await response.json();
+      
+      const userDetails: SpotifyUser = {
+        id: data.id || "spotify_sync_user",
+        displayName: data.display_name || "Spotify Member",
+        avatarUrl: data.images?.[0]?.url || data.images?.[1]?.url || "https://images.unsplash.com/photo-1541167760496-1628856ab772?w=100&q=80",
+        product: data.product || "Premium"
+      };
+
+      setSpotifyUser(userDetails);
+      await saveUserSetting("spotify_user", userDetails);
+      return userDetails;
+    } catch (err: any) {
+      console.warn("Retrieve Profile failed, using cached or fallback name:", err);
+      // Fallback
+      const userDetails: SpotifyUser = {
+        id: "spotify_sync_user",
+        displayName: "Spotify Member",
+        avatarUrl: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&q=80",
+        product: "Premium"
+      };
+      setSpotifyUser(userDetails);
+      await saveUserSetting("spotify_user", userDetails);
+      return userDetails;
+    }
+  };
+
   // Load Spotify persistence on start
   useEffect(() => {
     const loadSpotifySession = async () => {
@@ -123,36 +183,26 @@ function MainAppLayout() {
 
       if (queryToken) {
         setSpotifyToken(queryToken);
-        const userDetails: SpotifyUser = {
-          id: "spotify_sync_user",
-          displayName: isQueryDemo ? "Demo User 🎵" : "Spotify Member",
-          avatarUrl: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&q=80",
-          product: isQueryDemo ? "Demo Mode" : "Premium"
-        };
-        setSpotifyUser(userDetails);
         
-        // Cache setting persistently
-        await saveUserSetting("spotify_token", queryToken);
-        await saveUserSetting("spotify_user", userDetails);
-
         // Strip the token from the browser location bar for security and cleanliness
         const cleanedUrl = new URL(window.location.href);
         cleanedUrl.searchParams.delete("spotify_token");
         cleanedUrl.searchParams.delete("spotify_is_demo");
         window.history.replaceState({}, document.title, cleanedUrl.toString());
 
-        fetchSpotifyPlaylists(queryToken);
+        await saveUserSetting("spotify_token", queryToken);
+        await fetchSpotifyUserProfile(queryToken, isQueryDemo);
+        await fetchSpotifyPlaylists(queryToken);
         setShowSpotifyImportPopup(true);
         return;
       }
 
       // 2. Otherwise, load from local database persistence
       const savedToken = await getUserSetting<string | null>("spotify_token", null);
-      const savedUser = await getUserSetting<SpotifyUser | null>("spotify_user", null);
       if (savedToken) {
         setSpotifyToken(savedToken);
-        setSpotifyUser(savedUser);
-        fetchSpotifyPlaylists(savedToken);
+        await fetchSpotifyUserProfile(savedToken, savedToken.startsWith("demo_access_token_"));
+        await fetchSpotifyPlaylists(savedToken);
       }
     };
     loadSpotifySession();
@@ -160,7 +210,7 @@ function MainAppLayout() {
 
   // Listen to popup Message communication for Spotify connection
   useEffect(() => {
-    const handleAuthMessage = (event: MessageEvent) => {
+    const handleAuthMessage = async (event: MessageEvent) => {
       // Validate host origin is development run.app container, standard localhost, or exact current browser origin
       const origin = event.origin;
       if (!origin.endsWith(".run.app") && !origin.includes("localhost") && origin !== window.location.origin) {
@@ -171,19 +221,9 @@ function MainAppLayout() {
         const token = event.data.accessToken;
         setSpotifyToken(token);
         
-        // Simulating loading profile information
-        const userDetails: SpotifyUser = {
-          id: "spotify_sync_user",
-          displayName: event.data.isDemo ? "Demo User 🎵" : "Spotify Member",
-          avatarUrl: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&q=80",
-          product: event.data.isDemo ? "Demo Mode" : "Premium"
-        };
-
-        setSpotifyUser(userDetails);
-        saveUserSetting("spotify_token", token);
-        saveUserSetting("spotify_user", userDetails);
-
-        fetchSpotifyPlaylists(token);
+        await saveUserSetting("spotify_token", token);
+        await fetchSpotifyUserProfile(token, event.data.isDemo);
+        await fetchSpotifyPlaylists(token);
         setShowSpotifyImportPopup(true);
       }
     };
@@ -194,6 +234,7 @@ function MainAppLayout() {
 
   // Fetch playlists from Spotify (or mock response via Server proxy)
   const fetchSpotifyPlaylists = async (token: string) => {
+    setSpotifyPlaylistsError(null);
     try {
       const response = await fetch(getAbsoluteApiUrl("/api/spotify/proxy"), {
         method: "POST",
@@ -204,7 +245,10 @@ function MainAppLayout() {
         })
       });
 
-      if (!response.ok) throw new Error("Failed to load playlists");
+      if (!response.ok) {
+        const errObj = await response.json().catch(() => ({}));
+        throw new Error(errObj.error || `HTTP error ${response.status}`);
+      }
       const data = await response.json();
       
       if (data && data.items) {
@@ -232,7 +276,8 @@ function MainAppLayout() {
           artworkUrl: item.images?.[0]?.url || "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300&q=80",
           tracks: [], // load on selection/sync
           isSpotify: true,
-          spotifyId: item.id
+          spotifyId: item.id,
+          createdAt: Date.now()
         }));
 
         setSpotifyPlaylists(parsedPlaylists);
@@ -242,9 +287,15 @@ function MainAppLayout() {
           const locals = prev.filter(p => !p.isSpotify);
           return [...locals, ...parsedPlaylists];
         });
+      } else {
+        setSpotifyPlaylists([]);
       }
-    } catch (err) {
-      console.error("Spotify tracks loading failed:", err);
+    } catch (err: any) {
+      console.error("Spotify playlists loading failed:", err);
+      setSpotifyPlaylistsError(
+        `Failed to retrieve account playlists: ${err.message || err}. ` +
+        `Note: In Spotify Developer sandbox mode, only whitelisted accounts can retrieve developer resources. See Configuration tips below.`
+      );
     }
   };
 
@@ -436,6 +487,118 @@ function MainAppLayout() {
     await triggerSpotifySync(copyPlaylist);
   };
 
+  const handleImportPlaylistByUrl = async (inputUrl: string) => {
+    if (!inputUrl.trim()) return;
+    if (!spotifyToken) {
+      alert("Please connect Spotify first to import playlists.");
+      return;
+    }
+
+    setIsImportingUrl(true);
+    setImportStatusMsg("Analyzing Spotify URL...");
+
+    try {
+      // Extract Playlist ID from URL (e.g. 'https://open.spotify.com/playlist/37i9dQZF1DXcBWIGsy3gvl?si=...')
+      let playlistId = inputUrl.trim();
+      if (playlistId.includes("playlist/")) {
+        const parts = playlistId.split("playlist/");
+        if (parts[1]) {
+          playlistId = parts[1].split("?")[0].split("/")[0];
+        }
+      }
+
+      if (!playlistId || playlistId.length < 15) {
+        throw new Error("Invalid playlist URL or ID format. Please copy a correct Link from Spotify.");
+      }
+
+      setImportStatusMsg("Querying Spotify API for metadata...");
+
+      // Fetch playlist details from proxy
+      const response = await fetch(getAbsoluteApiUrl("/api/spotify/proxy"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          endpoint: `playlists/${playlistId}`,
+          token: spotifyToken
+        })
+      });
+
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({}));
+        throw new Error(errJson.error || `Failed to fetch (HTTP ${response.status})`);
+      }
+
+      const data = await response.json();
+      
+      // Parse playlist metadata and sync tracks
+      const plId = data.id || `sp_pl_${Date.now()}`;
+      
+      const syncedTracks: Track[] = (data.tracks?.items || []).map((entry: any, index: number) => {
+        const t = entry.track;
+        if (!t) return null;
+        return {
+          id: t.id || `sp_tr_${index}_${Date.now()}`,
+          name: t.name,
+          artist: t.artists?.[0]?.name || "Unknown Artist",
+          album: t.album?.name || "Single",
+          duration: Math.round(t.duration_ms / 1000) || 180,
+          artworkUrl: t.album?.images?.[0]?.url || "https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=100&q=80",
+          source: "spotify" as const,
+          previewUrl: t.preview_url || `https://www.soundhelix.com/examples/mp3/SoundHelix-Song-${(index % 12) + 1}.mp3`
+        };
+      }).filter(Boolean) as Track[];
+
+      const importedPlaylist: Playlist = {
+        id: plId,
+        name: data.name || "Imported Playlist",
+        description: data.description || "Synthesizer Import from Spotify link",
+        artworkUrl: data.images?.[0]?.url || "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300&q=80",
+        tracks: syncedTracks,
+        isSpotify: true,
+        spotifyId: plId,
+        createdAt: Date.now()
+      };
+
+      // Check if already in playlists state
+      const alreadyExists = playlists.some(p => p.spotifyId === plId || p.id === plId);
+      if (alreadyExists) {
+        setImportStatusMsg("Already imported! Check your collection.");
+        setTimeout(() => setImportStatusMsg(""), 3000);
+        return;
+      }
+
+      // Save to IndexedDB
+      await savePlaylist(importedPlaylist);
+      
+      // Append matching lists in memory state
+      setSpotifyPlaylists(prev => {
+        if (prev.some(p => p.id === plId)) return prev;
+        return [importedPlaylist, ...prev];
+      });
+
+      setPlaylists(prev => {
+        const clean = prev.filter(p => p.id !== plId);
+        return [importedPlaylist, ...clean];
+      });
+
+      setImportStatusMsg("Playlist sync completed successfully!");
+      setPlaylistUrlInput("");
+
+      // Automatically select this playlist
+      setActiveTab("spotify-sync");
+      // Give UI some feedback time
+      setTimeout(() => {
+        setImportStatusMsg("");
+      }, 4000);
+
+    } catch (err: any) {
+      console.error("Manual Import failed:", err);
+      setImportStatusMsg(`Import failed: ${err.message || err}`);
+    } finally {
+      setIsImportingUrl(false);
+    }
+  };
+
   // Format MM:SS
   const formatTime = (time: number) => {
     if (isNaN(time)) return "0:00";
@@ -473,6 +636,8 @@ function MainAppLayout() {
             isSpotifyConnected={!!spotifyToken}
             onTriggerSpotifySync={triggerSpotifySync}
             syncingPlaylistId={syncingPlaylistId}
+            localTracks={localTracks}
+            spotifyToken={spotifyToken}
           />
         );
       case "scanner":
@@ -505,6 +670,12 @@ function MainAppLayout() {
             onLocalTracksRefreshed={refreshLocalData}
             onTriggerSpotifySync={triggerSpotifySync}
             syncingPlaylistId={syncingPlaylistId}
+            spotifyPlaylistsError={spotifyPlaylistsError}
+            playlistUrlInput={playlistUrlInput}
+            setPlaylistUrlInput={setPlaylistUrlInput}
+            isImportingUrl={isImportingUrl}
+            importStatusMsg={importStatusMsg}
+            onImportPlaylistByUrl={handleImportPlaylistByUrl}
           />
         );
     }
@@ -542,9 +713,15 @@ function MainAppLayout() {
         <div id="spotify-connection-header" className="flex flex-col items-end">
           {spotifyToken ? (
             <div className="flex items-center space-x-3 text-xs bg-black/40 border border-[#1DB954]/30 rounded-full py-1.5 pl-3 pr-4 shadow-lg select-none">
-              <div className="w-6 h-6 rounded-full bg-[#1DB954]/10 border border-[#1DB954]/40 flex items-center justify-center shrink-0">
-                <span className="text-[10px] text-[#1DB954] font-bold">SP</span>
-              </div>
+              {spotifyUser?.avatarUrl ? (
+                <div className="w-6 h-6 rounded-full overflow-hidden border border-[#1DB954]/30 shrink-0">
+                  <img src={spotifyUser.avatarUrl} alt={spotifyUser.displayName} referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+                </div>
+              ) : (
+                <div className="w-6 h-6 rounded-full bg-[#1DB954]/10 border border-[#1DB954]/40 flex items-center justify-center shrink-0">
+                  <span className="text-[10px] text-[#1DB954] font-bold">SP</span>
+                </div>
+              )}
               <div className="hidden sm:block">
                 <p className="text-white font-bold leading-none truncate max-w-[100px]">{spotifyUser?.displayName || "Connected"}</p>
                 <p className="text-[8px] text-zinc-500 font-mono mt-0.5 uppercase tracking-wide leading-none">{spotifyUser?.product || "Premium"}</p>
@@ -885,6 +1062,12 @@ function MainAppLayout() {
         savedPlaylists={playlists}
         onImport={handleImportSpotifyPlaylist}
         syncingPlaylistId={syncingPlaylistId}
+        spotifyPlaylistsError={spotifyPlaylistsError}
+        playlistUrlInput={playlistUrlInput}
+        setPlaylistUrlInput={setPlaylistUrlInput}
+        isImportingUrl={isImportingUrl}
+        importStatusMsg={importStatusMsg}
+        onImportPlaylistByUrl={handleImportPlaylistByUrl}
       />
 
     </div>

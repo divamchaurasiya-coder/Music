@@ -3,7 +3,7 @@ import {
   SpotifyUser, Track, Playlist 
 } from "../types";
 import { 
-  FolderDown, Music, Check, RefreshCw, AlertTriangle, Play, HelpCircle, HardDrive, Smartphone, Sparkles, LogIn, Trash2
+  FolderDown, Music, Check, RefreshCw, AlertTriangle, Play, HelpCircle, HardDrive, Smartphone, Sparkles, LogIn, Trash2, Link as LinkIcon
 } from "lucide-react";
 import { 
   saveLocalTrack, deleteLocalTrack, getAllLocalTracks, savePlaylist 
@@ -20,6 +20,12 @@ interface SpotifyOfflineSyncProps {
   onLocalTracksRefreshed: () => void;
   onTriggerSpotifySync: (playlist: Playlist) => Promise<void>;
   syncingPlaylistId: string | null;
+  spotifyPlaylistsError?: string | null;
+  playlistUrlInput?: string;
+  setPlaylistUrlInput?: (val: string) => void;
+  isImportingUrl?: boolean;
+  importStatusMsg?: string;
+  onImportPlaylistByUrl?: (url: string) => Promise<void>;
 }
 
 export const SpotifyOfflineSync: React.FC<SpotifyOfflineSyncProps> = ({
@@ -33,6 +39,12 @@ export const SpotifyOfflineSync: React.FC<SpotifyOfflineSyncProps> = ({
   onLocalTracksRefreshed,
   onTriggerSpotifySync,
   syncingPlaylistId,
+  spotifyPlaylistsError,
+  playlistUrlInput,
+  setPlaylistUrlInput,
+  isImportingUrl,
+  importStatusMsg,
+  onImportPlaylistByUrl,
 }) => {
   const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(null);
   const [offlineTrackIds, setOfflineTrackIds] = useState<Set<string>>(new Set());
@@ -289,19 +301,61 @@ export const SpotifyOfflineSync: React.FC<SpotifyOfflineSyncProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
           
           {/* Playlists Left Side Rack */}
-          <div className="md:col-span-4 bg-black/20 border border-white/5 rounded-2xl p-4 flex flex-col h-[280px] md:h-[450px]">
+          <div className="md:col-span-4 bg-black/20 border border-white/5 rounded-2xl p-4 flex flex-col h-auto md:h-[520px]">
             <div className="flex items-center space-x-2 mb-3 px-1">
               <Sparkles className="w-4 h-4 text-[#1DB954]" />
               <h3 className="text-xs font-bold text-white uppercase tracking-wider">
-                My Spotify playlists ({spotifyPlaylists.length})
+                Spotify Playlists ({spotifyPlaylists.length})
               </h3>
             </div>
 
-            <div className="flex-1 overflow-y-auto space-y-1.5 custom-scrollbar-light select-none">
+            {/* Error badge in the list */}
+            {spotifyPlaylistsError && (
+              <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 mb-3 text-[10px] text-red-400 font-mono space-y-1">
+                <div className="flex items-center space-x-1 font-bold text-red-500">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                  <span>SYNC POOL RESTRICTIONS</span>
+                </div>
+                <p className="leading-tight">In Spotify API development, only whitelisted testers are polled dynamically. You can bypass this instantly using the Link Import field below!</p>
+              </div>
+            )}
+
+            {/* Direct manual sync input in sidebar */}
+            <div className="bg-white/5 border border-white/10 rounded-xl p-3 mb-3 space-y-2">
+              <div className="flex items-center space-x-1.5">
+                <LinkIcon className="w-3.5 h-3.5 text-[#1DB954]" />
+                <p className="text-[10px] text-[#1DB954] font-mono uppercase tracking-wider font-bold">Import Playlist Link</p>
+              </div>
+              <p className="text-[9px] text-zinc-400">
+                Pasted links/ID fetch instantly:
+              </p>
+              <div className="flex space-x-1.5">
+                <input
+                  type="text"
+                  placeholder="Paste Spotify Link..."
+                  value={playlistUrlInput || ""}
+                  onChange={(e) => setPlaylistUrlInput?.(e.target.value)}
+                  className="flex-1 bg-black/50 border border-white/10 rounded-lg px-2 py-1 text-[11px] text-white focus:outline-none focus:border-[#1DB954] placeholder-zinc-600"
+                />
+                <button
+                  id="direct-tab-url-import-btn"
+                  disabled={isImportingUrl || !playlistUrlInput?.trim()}
+                  onClick={() => onImportPlaylistByUrl?.(playlistUrlInput || "")}
+                  className="bg-[#1DB954] text-black font-bold text-[10px] py-1 px-3 rounded-lg hover:bg-[#1ed760] disabled:opacity-40 transition-all cursor-pointer whitespace-nowrap"
+                >
+                  {isImportingUrl ? "Sync..." : "Fetch"}
+                </button>
+              </div>
+              {importStatusMsg && (
+                <p className="text-[8px] text-amber-400 font-mono italic animate-pulse">{importStatusMsg}</p>
+              )}
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-1.5 custom-scrollbar-light select-none max-h-[220px] md:max-h-none">
               {spotifyPlaylists.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-center p-4">
                   <RefreshCw className="w-6 h-6 text-zinc-600 animate-spin mb-2" />
-                  <p className="text-xs text-zinc-500">Retrieving account streams...</p>
+                  <p className="text-xs text-zinc-500">Polling accounts...</p>
                 </div>
               ) : (
                 spotifyPlaylists.map((pl) => {
@@ -342,7 +396,7 @@ export const SpotifyOfflineSync: React.FC<SpotifyOfflineSyncProps> = ({
           </div>
 
           {/* Playlist detail Offline downloader view */}
-          <div className="md:col-span-8 bg-black/20 border border-white/5 rounded-2xl p-5 flex flex-col min-h-[350px] md:h-[450px]">
+          <div className="md:col-span-8 bg-black/20 border border-white/5 rounded-2xl p-5 flex flex-col min-h-[350px] md:h-[520px]">
             {selectedPlaylist ? (
               <>
                 {/* Detailed Playlist Header card */}
