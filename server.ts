@@ -97,13 +97,20 @@ app.get("/api/spotify/callback", async (req, res) => {
           </div>
           <script>
             setTimeout(() => {
-              window.opener.postMessage({
-                type: "OAUTH_AUTH_SUCCESS",
-                accessToken: "${demoToken}",
-                isDemo: true
-              }, "${targetOrigin}");
-              window.close();
-            }, 1500);
+              if (window.opener) {
+                window.opener.postMessage({
+                  type: "OAUTH_AUTH_SUCCESS",
+                  accessToken: "${demoToken}",
+                  isDemo: true
+                }, "${targetOrigin}");
+                window.close();
+              } else {
+                const url = new URL("${targetOrigin}");
+                url.searchParams.set("spotify_token", "${demoToken}");
+                url.searchParams.set("spotify_is_demo", "true");
+                window.location.href = url.toString();
+              }
+            }, 1000);
           </script>
         </body>
       </html>
@@ -151,12 +158,19 @@ app.get("/api/spotify/callback", async (req, res) => {
             <p>Finishing synchronization...</p>
           </div>
           <script>
-            window.opener.postMessage({
-              type: "OAUTH_AUTH_SUCCESS",
-              accessToken: "${accessToken}",
-              isDemo: false
-            }, "${targetOrigin}");
-            window.close();
+            if (window.opener) {
+              window.opener.postMessage({
+                type: "OAUTH_AUTH_SUCCESS",
+                accessToken: "${accessToken}",
+                isDemo: false
+              }, "${targetOrigin}");
+              window.close();
+            } else {
+              const url = new URL("${targetOrigin}");
+              url.searchParams.set("spotify_token", "${accessToken}");
+              url.searchParams.set("spotify_is_demo", "false");
+              window.location.href = url.toString();
+            }
           </script>
         </body>
       </html>
@@ -190,12 +204,20 @@ app.get("/api/spotify/callback", async (req, res) => {
           </div>
           <script>
             function useSandboxFallback() {
-              window.opener.postMessage({
-                type: "OAUTH_AUTH_SUCCESS",
-                accessToken: "demo_access_token_fallback_" + Math.random().toString(36).substring(2),
-                isDemo: true
-              }, "${targetOrigin}");
-              window.close();
+              const demoToken = "demo_access_token_fallback_" + Math.random().toString(36).substring(2);
+              if (window.opener) {
+                window.opener.postMessage({
+                  type: "OAUTH_AUTH_SUCCESS",
+                  accessToken: demoToken,
+                  isDemo: true
+                }, "${targetOrigin}");
+                window.close();
+              } else {
+                const url = new URL("${targetOrigin}");
+                url.searchParams.set("spotify_token", demoToken);
+                url.searchParams.set("spotify_is_demo", "true");
+                window.location.href = url.toString();
+              }
             }
           </script>
         </body>

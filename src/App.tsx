@@ -95,6 +95,36 @@ function MainAppLayout() {
   // Load Spotify persistence on start
   useEffect(() => {
     const loadSpotifySession = async () => {
+      // 1. Check query parameters first in case of a same-tab authorization redirection fallback
+      const params = new URLSearchParams(window.location.search);
+      const queryToken = params.get("spotify_token");
+      const isQueryDemo = params.get("spotify_is_demo") === "true";
+
+      if (queryToken) {
+        setSpotifyToken(queryToken);
+        const userDetails: SpotifyUser = {
+          id: "spotify_sync_user",
+          displayName: isQueryDemo ? "Demo User 🎵" : "Spotify Member",
+          avatarUrl: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&q=80",
+          product: isQueryDemo ? "Demo Mode" : "Premium"
+        };
+        setSpotifyUser(userDetails);
+        
+        // Cache setting persistently
+        await saveUserSetting("spotify_token", queryToken);
+        await saveUserSetting("spotify_user", userDetails);
+
+        // Strip the token from the browser location bar for security and cleanliness
+        const cleanedUrl = new URL(window.location.href);
+        cleanedUrl.searchParams.delete("spotify_token");
+        cleanedUrl.searchParams.delete("spotify_is_demo");
+        window.history.replaceState({}, document.title, cleanedUrl.toString());
+
+        fetchSpotifyPlaylists(queryToken);
+        return;
+      }
+
+      // 2. Otherwise, load from local database persistence
       const savedToken = await getUserSetting<string | null>("spotify_token", null);
       const savedUser = await getUserSetting<SpotifyUser | null>("spotify_user", null);
       if (savedToken) {
@@ -258,7 +288,7 @@ function MainAppLayout() {
     return list;
   };
 
-  // Generate / Handle Spotify connection popup
+  // Generate / Handle Spotify connection popup with same-tab redirect fallback for sandboxed iframe environments
   const connectSpotify = async () => {
     setIsConnectingSpotify(true);
     try {
@@ -280,14 +310,20 @@ function MainAppLayout() {
         ? `${authUrl}&state=${encodeURIComponent(stateParam)}`
         : `${authUrl}?state=${encodeURIComponent(stateParam)}`;
 
-      const authPopup = window.open(
-        finalUrl,
-        "spotify_oauth_popup",
-        `width=${width},height=${height},top=${top},left=${left},scrollbars=yes,resizable=yes`
-      );
+      let authPopup = null;
+      try {
+        authPopup = window.open(
+          finalUrl,
+          "spotify_oauth_popup",
+          `width=${width},height=${height},top=${top},left=${left},scrollbars=yes,resizable=yes`
+        );
+      } catch (domErr) {
+        console.warn("Iframe popup blocker or Security Policy prevented window.open. Triggering same-tab seamless OAuth login:", domErr);
+      }
 
       if (!authPopup) {
-        alert("Authorization Window Blocked. Please check browser privacy parameters and allow popups to connect.");
+        // Safe, direct, universal fallback for sandboxed preview IFrames
+        window.location.href = finalUrl;
       }
     } catch (e) {
       console.error("Failed to fetch Spotify Redirect parameters:", e);
