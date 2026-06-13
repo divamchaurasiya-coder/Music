@@ -1,0 +1,6 @@
+{
+  "name": "Cross-Platform Music Player",
+  "description": "A premium dark-themed music player with offline playback, local file scanning, playlists, equalizer, and seamless Spotify integration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
