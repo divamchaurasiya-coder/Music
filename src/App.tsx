@@ -331,10 +331,14 @@ function MainAppLayout() {
 
     try {
       let clientOrigin = window.location.origin === "null" ? "" : window.location.origin;
-      if (!clientOrigin) {
+      if (!clientOrigin || !clientOrigin.startsWith("http")) {
         try {
           const parsed = new URL(window.location.href);
-          clientOrigin = `${parsed.protocol}//${parsed.host}`;
+          if (parsed.protocol && parsed.protocol.startsWith("http")) {
+            clientOrigin = `${parsed.protocol}//${parsed.host}`;
+          } else {
+            clientOrigin = "";
+          }
         } catch (e) {
           clientOrigin = "";
         }
