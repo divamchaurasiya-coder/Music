@@ -11,9 +11,11 @@ import { LocalScanner } from "./components/LocalScanner";
 import { PlaylistManager } from "./components/PlaylistManager";
 import { SearchAndDiscover } from "./components/SearchAndDiscover";
 import { FullscreenPlayer } from "./components/FullscreenPlayer";
+import { SpotifyOfflineSync } from "./components/SpotifyOfflineSync";
+import { SpotifyImportPopup } from "./components/SpotifyImportPopup";
 import { 
   Music, LogIn, Library, Sliders, FolderUp, RefreshCw, Heart, 
-  Play, Pause, SkipForward, SkipBack, Sparkles, Volume2, Search, Maximize2, X
+  Play, Pause, SkipForward, SkipBack, Sparkles, Volume2, Search, Maximize2, X, FolderDown
 } from "lucide-react";
 import { Track, Playlist, SpotifyUser } from "./types";
 import { getAllLocalTracks, getAllPlaylists, savePlaylist, getUserSetting, saveUserSetting, openDB } from "./utils/db";
@@ -36,7 +38,7 @@ const getAbsoluteApiUrl = (apiPath: string) => {
 };
 
 function MainAppLayout() {
-  const [activeTab, setActiveTab] = useState<"discover" | "library" | "scanner" | "equalizer">("discover");
+  const [activeTab, setActiveTab] = useState<"discover" | "library" | "scanner" | "equalizer" | "spotify-sync">("discover");
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [localTracks, setLocalTracks] = useState<Track[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
@@ -48,6 +50,7 @@ function MainAppLayout() {
   const [spotifyError, setSpotifyError] = useState<string | null>(null);
   const [syncingPlaylistId, setSyncingPlaylistId] = useState<string | null>(null);
   const [selectPlaylistModalOpen, setSelectPlaylistModalOpen] = useState(false);
+  const [showSpotifyImportPopup, setShowSpotifyImportPopup] = useState(false);
   const [trackToAdd, setTrackToAdd] = useState<Track | null>(null);
 
   const {
@@ -139,6 +142,7 @@ function MainAppLayout() {
         window.history.replaceState({}, document.title, cleanedUrl.toString());
 
         fetchSpotifyPlaylists(queryToken);
+        setShowSpotifyImportPopup(true);
         return;
       }
 
@@ -180,6 +184,7 @@ function MainAppLayout() {
         saveUserSetting("spotify_user", userDetails);
 
         fetchSpotifyPlaylists(token);
+        setShowSpotifyImportPopup(true);
       }
     };
 
@@ -417,6 +422,20 @@ function MainAppLayout() {
     setTrackToAdd(null);
   };
 
+  const handleImportSpotifyPlaylist = async (playlist: Playlist) => {
+    const alreadySaved = playlists.some(p => p.spotifyId === playlist.id || p.id === playlist.id);
+    if (alreadySaved) return;
+
+    const copyPlaylist: Playlist = {
+      ...playlist,
+      createdAt: Date.now()
+    };
+    await savePlaylist(copyPlaylist);
+    await refreshLocalData();
+    
+    await triggerSpotifySync(copyPlaylist);
+  };
+
   // Format MM:SS
   const formatTime = (time: number) => {
     if (isNaN(time)) return "0:00";
@@ -472,6 +491,21 @@ function MainAppLayout() {
               Applying custom presets filters physical audio nodes processing in the Web Audio context pipeline live. Keeps vocals crispy and sub-bass booming.
             </div>
           </div>
+        );
+      case "spotify-sync":
+        return (
+          <SpotifyOfflineSync
+            spotifyUser={spotifyUser}
+            spotifyToken={spotifyToken}
+            spotifyPlaylists={spotifyPlaylists}
+            playlists={playlists}
+            connectSpotify={connectSpotify}
+            isConnectingSpotify={isConnectingSpotify}
+            onPlayTrack={(track, queue) => playTrack(track, queue || [track])}
+            onLocalTracksRefreshed={refreshLocalData}
+            onTriggerSpotifySync={triggerSpotifySync}
+            syncingPlaylistId={syncingPlaylistId}
+          />
         );
     }
   };
@@ -594,6 +628,17 @@ function MainAppLayout() {
         >
           Pro Equalizer
         </button>
+        <button
+          id="tab-spotify-sync-mobile-btn"
+          onClick={() => setActiveTab("spotify-sync")}
+          className={`px-4 py-2 rounded-full text-xs font-bold transition-all shrink-0 cursor-pointer ${
+            activeTab === "spotify-sync"
+              ? "bg-[#1DB954] text-black shadow-lg shadow-[#1DB954]/25"
+              : "bg-white/5 text-zinc-400 hover:text-white"
+          }`}
+        >
+          Spotify Sync
+        </button>
       </div>
 
       {/* Main Grid Wrapper with responsive sidebar */}
@@ -654,6 +699,19 @@ function MainAppLayout() {
             >
               <Sliders className="w-4.5 h-4.5 shrink-0" />
               <span className="font-semibold tracking-wide">Pro Equalizer</span>
+            </button>
+
+            <button
+              id="tab-spotify-sync-btn"
+              onClick={() => setActiveTab("spotify-sync")}
+              className={`flex items-center space-x-3.5 p-3 rounded-xl transition-all cursor-pointer ${
+                activeTab === "spotify-sync"
+                  ? "bg-gradient-to-r from-white/10 to-white/5 border border-white/10 text-[#1DB954]"
+                  : "text-zinc-400 hover:text-white hover:bg-white/5"
+              }`}
+            >
+              <FolderDown className="w-4.5 h-4.5 shrink-0" />
+              <span className="font-semibold tracking-wide">Offline Downloader</span>
             </button>
           </div>
 
@@ -818,6 +876,16 @@ function MainAppLayout() {
           </div>
         </div>
       )}
+
+      {/* Spotify Connection Celebratory Pop up and Playlist importer */}
+      <SpotifyImportPopup
+        isOpen={showSpotifyImportPopup}
+        onClose={() => setShowSpotifyImportPopup(false)}
+        playlists={spotifyPlaylists}
+        savedPlaylists={playlists}
+        onImport={handleImportSpotifyPlaylist}
+        syncingPlaylistId={syncingPlaylistId}
+      />
 
     </div>
   );
