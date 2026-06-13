@@ -18,6 +18,23 @@ import {
 import { Track, Playlist, SpotifyUser } from "./types";
 import { getAllLocalTracks, getAllPlaylists, savePlaylist, getUserSetting, saveUserSetting, openDB } from "./utils/db";
 
+const getAbsoluteApiUrl = (apiPath: string) => {
+  if (apiPath.startsWith("http://") || apiPath.startsWith("https://")) {
+    return apiPath;
+  }
+  try {
+    const currentUrl = window.location.href;
+    if (currentUrl && currentUrl.startsWith("http")) {
+      const parsed = new URL(currentUrl);
+      const cleanPath = apiPath.startsWith("/") ? apiPath : `/${apiPath}`;
+      return `${parsed.protocol}//${parsed.host}${cleanPath}`;
+    }
+  } catch (e) {
+    console.warn("Failed to construct absolute api URL from window.location.href:", e);
+  }
+  return apiPath;
+};
+
 function MainAppLayout() {
   const [activeTab, setActiveTab] = useState<"discover" | "library" | "scanner" | "equalizer">("discover");
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -173,7 +190,7 @@ function MainAppLayout() {
   // Fetch playlists from Spotify (or mock response via Server proxy)
   const fetchSpotifyPlaylists = async (token: string) => {
     try {
-      const response = await fetch("/api/spotify/proxy", {
+      const response = await fetch(getAbsoluteApiUrl("/api/spotify/proxy"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -232,7 +249,7 @@ function MainAppLayout() {
     setSyncingPlaylistId(playlist.id);
 
     try {
-      const response = await fetch("/api/spotify/proxy", {
+      const response = await fetch(getAbsoluteApiUrl("/api/spotify/proxy"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -313,8 +330,16 @@ function MainAppLayout() {
     }
 
     try {
-      const clientOrigin = window.location.origin === "null" ? "" : window.location.origin;
-      const res = await fetch(`/api/spotify/auth-url?origin=${encodeURIComponent(clientOrigin)}`);
+      let clientOrigin = window.location.origin === "null" ? "" : window.location.origin;
+      if (!clientOrigin) {
+        try {
+          const parsed = new URL(window.location.href);
+          clientOrigin = `${parsed.protocol}//${parsed.host}`;
+        } catch (e) {
+          clientOrigin = "";
+        }
+      }
+      const res = await fetch(getAbsoluteApiUrl(`/api/spotify/auth-url?origin=${encodeURIComponent(clientOrigin)}`));
       
       if (!res.ok) {
         throw new Error(`Server returned HTTP ${res.status}`);
