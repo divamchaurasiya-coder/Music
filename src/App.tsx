@@ -155,7 +155,24 @@ function MainAppLayout() {
       const data = await response.json();
       
       if (data && data.items) {
-        const parsedPlaylists: Playlist[] = data.items.map((item: any) => ({
+        let items = data.items;
+
+        // Always ensure the showcase premade playlist is first
+        const premadePlaylistId = "4CbXJfRFkVum9E7asvARS6";
+        const hasPremade = items.some((item: any) => item.id === premadePlaylistId);
+        if (!hasPremade) {
+          items = [
+            {
+              id: premadePlaylistId,
+              name: "Featured Vibes (Premade Playlist)",
+              description: "Ready-to-sync showcase compilation via real Spotify API",
+              images: [{ url: "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&q=80" }]
+            },
+            ...items
+          ];
+        }
+
+        const parsedPlaylists: Playlist[] = items.map((item: any) => ({
           id: item.id,
           name: item.name,
           description: item.description,
@@ -256,9 +273,11 @@ function MainAppLayout() {
 
       // Passing origin as state so callback redirects accurately
       const stateParam = window.location.origin;
-      const finalUrl = authUrl.includes("?") 
+      const finalUrl = authUrl.includes("state=")
+        ? authUrl // Already has state constructed on server
+        : authUrl.includes("?") 
         ? `${authUrl}&state=${encodeURIComponent(stateParam)}`
-        : authUrl;
+        : `${authUrl}?state=${encodeURIComponent(stateParam)}`;
 
       const authPopup = window.open(
         finalUrl,

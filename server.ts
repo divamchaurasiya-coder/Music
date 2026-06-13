@@ -25,8 +25,10 @@ app.get("/api/spotify/auth-url", (req, res) => {
   const host = req.headers.host || "localhost:3000";
   const protocol = req.headers["x-forwarded-proto"] || "http";
   
-  // Spotify Dashboard requires this exact URI registered
-  const defaultRedirectUri = `${protocol}://${host}/api/spotify/callback`;
+  // Spotify Dashboard requires this exact URI registered.
+  // Use official APP_URL if set, otherwise fallback to request headers.
+  const baseUrl = process.env.APP_URL ? process.env.APP_URL.replace(/\/+$/, "") : `${protocol}://${host}`;
+  const defaultRedirectUri = `${baseUrl}/api/spotify/callback`;
   
   const scopes = [
     "user-read-private",
@@ -38,7 +40,7 @@ app.get("/api/spotify/auth-url", (req, res) => {
   if (!SPOTIFY_CLIENT_ID || !SPOTIFY_CLIENT_SECRET) {
     // Return a working Demo Flow if API credentials aren't configured yet!
     // This allows the user to test the UI immediately without setup friction.
-    const demoUrl = `/api/spotify/callback?code=demo_access_token_12345&state=${encodeURIComponent(protocol + "://" + host)}`;
+    const demoUrl = `/api/spotify/callback?code=demo_access_token_12345&state=${encodeURIComponent(baseUrl)}`;
     return res.json({
       url: demoUrl,
       demoUrl: demoUrl,
@@ -53,7 +55,7 @@ app.get("/api/spotify/auth-url", (req, res) => {
     client_id: SPOTIFY_CLIENT_ID,
     scope: scopes,
     redirect_uri: defaultRedirectUri,
-    state: `${protocol}://${host}` // Pass target origin as state to safely handle redirect back
+    state: baseUrl // Pass target origin as state to safely handle redirect back
   }).toString()}`;
 
   res.json({ url: spotifyAuthUrl, isDemo: false });
@@ -64,10 +66,12 @@ app.get("/api/spotify/callback", async (req, res) => {
   const { code, state } = req.query;
   const host = req.headers.host || "localhost:3000";
   const protocol = req.headers["x-forwarded-proto"] || "http";
-  const redirectUri = `${protocol}://${host}/api/spotify/callback`;
+  
+  const baseUrl = process.env.APP_URL ? process.env.APP_URL.replace(/\/+$/, "") : `${protocol}://${host}`;
+  const redirectUri = `${baseUrl}/api/spotify/callback`;
 
   // Fallback state if undefined
-  const targetOrigin = (state as string) || `${protocol}://${host}`;
+  const targetOrigin = (state as string) || baseUrl;
 
   // 1. Handle Demo Mode bypass
   if (code === "demo_access_token_12345" || !SPOTIFY_CLIENT_ID) {
@@ -185,14 +189,20 @@ app.post("/api/spotify/proxy", async (req, res) => {
       return res.json({
         items: [
           {
+            id: "4CbXJfRFkVum9E7asvARS6",
+            name: "Featured Vibes (Premade Playlist)",
+            description: "Ready-to-sync showcase compilation via real Spotify API",
+            images: [{ url: "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&q=80" }]
+          },
+          {
             id: "demo_lofi_vibes",
-            name: "Study Chill (Demo Selection)",
+            name: "Study Chill (Demo)",
             description: "Curated late night lo-fi recordings",
             images: [{ url: "https://images.unsplash.com/photo-1518609878373-06d740f60d8b?w=300&q=80" }]
           },
           {
             id: "demo_retro_cyber",
-            name: "Outrun Electro Drive (Demo Selection)",
+            name: "Outrun Electro Drive (Demo)",
             description: "High velocity neon retro synthwaves",
             images: [{ url: "https://images.unsplash.com/photo-1515462277126-270d878326e5?w=300&q=80" }]
           }
@@ -200,7 +210,7 @@ app.post("/api/spotify/proxy", async (req, res) => {
       });
     }
 
-    if (endpoint.startsWith("playlists/demo_lofi_vibes")) {
+    if (endpoint.startsWith("playlists/demo_lofi_vibes") || endpoint.startsWith("playlists/4CbXJfRFkVum9E7asvARS6")) {
       return res.json({
         tracks: {
           items: [
@@ -222,6 +232,26 @@ app.post("/api/spotify/proxy", async (req, res) => {
                 artists: [{ name: "Midnight Beats" }],
                 album: { name: "Sleepy Rails", images: [{ url: "https://images.unsplash.com/photo-1474487548417-781cb71495f3?w=150&q=80" }] },
                 preview_url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3"
+              }
+            },
+            {
+              track: {
+                id: "demo_tr_l3",
+                name: "Retro City Rain",
+                duration_ms: 245000,
+                artists: [{ name: "Neon Rainmakers" }],
+                album: { name: "Midnight Grid", images: [{ url: "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=150&q=80" }] },
+                preview_url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3"
+              }
+            },
+            {
+              track: {
+                id: "demo_tr_l4",
+                name: "Sunset Waves",
+                duration_ms: 185000,
+                artists: [{ name: "Pacific Breeze" }],
+                album: { name: "Golden Hour", images: [{ url: "https://images.unsplash.com/photo-1507838153414-b4b713384a76?w=150&q=80" }] },
+                preview_url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3"
               }
             }
           ]
